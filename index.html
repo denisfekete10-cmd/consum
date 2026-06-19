@@ -4,6 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Consum propriu — Mille Saporri</title>
+<script src="https://cdn.jsdelivr.net/npm/firebase@9.23.0/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@9.23.0/firebase-database-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyChZkGsouLB968Z3NGrNZ9qvM4mcQK3c1I",
+    authDomain: "pontaj-mille.firebaseapp.com",
+    databaseURL: "https://pontaj-mille-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "pontaj-mille",
+    storageBucket: "pontaj-mille.firebasestorage.app",
+    messagingSenderId: "963318307013",
+    appId: "1:963318307013:web:b3ece8e7849e24f078b8ac"
+  };
+  firebase.initializeApp(firebaseConfig);
+  window.fbdb = firebase.database();
+</script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -359,6 +374,22 @@ document.getElementById('nameInput').value = localStorage.getItem(NAME_KEY) || '
 
 function saveHistory() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  if (window.fbdb) {
+    window.fbdb.ref('consum/log').set(history).catch(function(e) {
+      console.error('Firebase save error:', e);
+    });
+  }
+}
+
+if (window.fbdb) {
+  window.fbdb.ref('consum/log').on('value', function(snapshot) {
+    var data = snapshot.val();
+    history = Array.isArray(data) ? data : [];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    if (typeof render === 'function') render();
+  }, function(err) {
+    console.error('Firebase read error:', err);
+  });
 }
 
 function getKnownNames() {
