@@ -82,6 +82,16 @@ h1 {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.add-row select {
+  flex: 1 1 140px;
+}
+.add-row input[type="number"] {
+  flex: 0 0 64px;
+}
+.add-row .btn-add {
+  flex: 1 0 auto;
 }
 select {
   flex: 1;
@@ -242,6 +252,43 @@ input[type="number"] {
   margin-top: 6px;
   min-height: 16px;
 }
+.report-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #e8e0d0;
+  font-size: 13px;
+}
+.report-name { font-weight: 500; }
+.report-qty {
+  font-weight: 700;
+  color: #C0181A;
+  background: #f5e0e0;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+.history-row-readonly {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid #e8e0d0;
+  font-size: 13px;
+}
+.sig-block{margin-top:14px}
+.sig-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.sig-header label{font-size:12px;font-weight:600;color:#1a1612}
+.sig-clear{background:none;border:none;color:#C0181A;font-size:12px;cursor:pointer;text-decoration:underline;padding:0}
+.sig-canvas{width:100%;height:110px;background:#fff;border:1px solid #ddd;border-radius:8px;touch-action:none;display:block}
+.sig-hint{font-size:11px;color:#999;margin-top:6px}
+.sig-thumb{width:50px;height:24px;object-fit:contain;background:#fff;border:1px solid #ddd;border-radius:4px;cursor:pointer;display:inline-block;margin-left:8px;vertical-align:middle}
+.sig-view-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;align-items:center;justify-content:center}
+.sig-view-overlay.open{display:flex}
+.sig-view-box{background:#fff;border-radius:12px;padding:20px;max-width:90vw}
+.sig-view-box img{max-width:100%;display:block}
+.sig-view-close{display:block;margin:14px auto 0;padding:8px 18px;background:#1a1612;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
 </style>
 </head>
 <body>
@@ -260,10 +307,25 @@ input[type="number"] {
 <div class="add-row">
   <select id="prodSelect"></select>
   <input type="number" id="qtyInput" value="1" min="1">
-  <button class="btn-add" id="addBtn">Adaugă</button>
 </div>
 
+<div class="sig-block">
+  <div class="sig-header">
+    <label>Semnătură (obligatorie)</label>
+    <button type="button" class="sig-clear" id="sigClearBtn">Șterge</button>
+  </div>
+  <canvas id="sigCanvas" class="sig-canvas"></canvas>
+  <div class="sig-hint">Semnează cu degetul ca să confirmi că tu ai consumat produsul.</div>
+</div>
+
+<button class="btn-add" id="addBtn" style="width:100%;margin-top:10px;">Adaugă</button>
+
 <div id="statusMsg"></div>
+
+<div class="history-header" style="margin-top:24px;">
+  <span class="history-title">Istoric consum</span>
+</div>
+<div id="publicHistoryList"></div>
 
 <div class="admin-link">
   <a href="#" id="adminToggle">Admin</a>
@@ -289,6 +351,11 @@ input[type="number"] {
     </div>
 
     <div class="history-header">
+      <span class="history-title">Raport pe produs</span>
+    </div>
+    <div id="productReport" style="margin-bottom:20px;"></div>
+
+    <div class="history-header">
       <span class="history-title">Istoric</span>
       <button class="btn-clear" id="clearBtn">Șterge tot</button>
     </div>
@@ -303,6 +370,13 @@ input[type="number"] {
       </div>
       <div id="codeChangeMsg" style="font-size:12px; color:#2a8a2a; margin-top:6px; min-height:16px;"></div>
     </div>
+  </div>
+</div>
+
+<div class="sig-view-overlay" id="sigViewOverlay" onclick="closeSigView(event)">
+  <div class="sig-view-box">
+    <img id="sigViewImg" src="" alt="Semnătură">
+    <button class="sig-view-close" onclick="closeSigView()">Închide</button>
   </div>
 </div>
 
@@ -458,6 +532,14 @@ function renderHistory() {
     const personBadge = h.person ? '<span class="history-person">' + h.person + '</span>' : '';
     left.innerHTML = '<span class="history-name">' + h.name + '</span> <span class="history-qty">×' + h.qty + '</span>' + personBadge + '<div class="history-date">' + dateStr + '</div>';
 
+    if (h.sig) {
+      const sigImg = document.createElement('img');
+      sigImg.src = h.sig;
+      sigImg.className = 'sig-thumb';
+      sigImg.onclick = () => viewSig(h.sig);
+      left.appendChild(sigImg);
+    }
+
     const delBtn = document.createElement('button');
     delBtn.className = 'btn-del';
     delBtn.textContent = '×';
@@ -474,29 +556,150 @@ function renderHistory() {
   });
 }
 
+function renderProductReport() {
+  const container = document.getElementById('productReport');
+  if (!container) return;
+  container.innerHTML = '';
+  const totals = {};
+  history.forEach(h => {
+    totals[h.name] = (totals[h.name] || 0) + h.qty;
+  });
+  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  if (sorted.length === 0) {
+    container.innerHTML = '<div class="empty-state">Nimic consumat încă</div>';
+    return;
+  }
+  sorted.forEach(([name, qty]) => {
+    const row = document.createElement('div');
+    row.className = 'report-row';
+    row.innerHTML = '<span class="report-name">' + name + '</span><span class="report-qty">' + qty + ' buc</span>';
+    container.appendChild(row);
+  });
+}
+
+function renderPublicHistory() {
+  const list = document.getElementById('publicHistoryList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (history.length === 0) {
+    list.innerHTML = '<div class="empty-state">Nicio înregistrare încă</div>';
+    return;
+  }
+  const sorted = history.slice().reverse();
+  sorted.forEach((h) => {
+    const row = document.createElement('div');
+    row.className = 'history-row-readonly';
+    const date = new Date(h.ts);
+    const dateStr = date.toLocaleDateString('ro-RO', { day:'2-digit', month:'2-digit', year:'2-digit' }) + ' ' + date.toLocaleTimeString('ro-RO', { hour:'2-digit', minute:'2-digit' });
+    const personBadge = h.person ? '<span class="history-person">' + h.person + '</span>' : '';
+    row.innerHTML = '<div><span class="history-name">' + h.name + '</span> <span class="history-qty">×' + h.qty + '</span>' + personBadge + '<div class="history-date">' + dateStr + '</div></div>';
+    list.appendChild(row);
+  });
+}
+
 function render() {
   renderTabs();
   renderSelect();
   renderStats();
   renderHistory();
   renderNameSuggestions();
+  renderPublicHistory();
+  renderProductReport();
 }
+
+/* ===== SEMNATURA DIGITALA ===== */
+var sigCanvas = document.getElementById('sigCanvas');
+var sigCtx = null;
+var sigDrawing = false;
+var sigHasStroke = false;
+var sigLastX = 0, sigLastY = 0;
+
+function resizeSigCanvas() {
+  if (!sigCanvas) return;
+  var rect = sigCanvas.getBoundingClientRect();
+  var ratio = window.devicePixelRatio || 1;
+  sigCanvas.width = rect.width * ratio;
+  sigCanvas.height = rect.height * ratio;
+  sigCtx = sigCanvas.getContext('2d');
+  sigCtx.scale(ratio, ratio);
+}
+
+function clearSignature() {
+  if (!sigCtx || !sigCanvas) return;
+  var rect = sigCanvas.getBoundingClientRect();
+  sigCtx.clearRect(0, 0, rect.width, rect.height);
+  sigHasStroke = false;
+}
+
+function initSignaturePad() {
+  if (!sigCanvas) return;
+  resizeSigCanvas();
+
+  function getPos(e) {
+    var rect = sigCanvas.getBoundingClientRect();
+    var x, y;
+    if (e.touches && e.touches.length) { x = e.touches[0].clientX - rect.left; y = e.touches[0].clientY - rect.top; }
+    else { x = e.clientX - rect.left; y = e.clientY - rect.top; }
+    return { x: x, y: y };
+  }
+  function start(e) {
+    sigDrawing = true;
+    var p = getPos(e);
+    sigLastX = p.x; sigLastY = p.y;
+    e.preventDefault();
+  }
+  function move(e) {
+    if (!sigDrawing) return;
+    var p = getPos(e);
+    sigCtx.strokeStyle = '#1a1612';
+    sigCtx.lineWidth = 2;
+    sigCtx.lineCap = 'round';
+    sigCtx.lineJoin = 'round';
+    sigCtx.beginPath();
+    sigCtx.moveTo(sigLastX, sigLastY);
+    sigCtx.lineTo(p.x, p.y);
+    sigCtx.stroke();
+    sigLastX = p.x; sigLastY = p.y;
+    sigHasStroke = true;
+    e.preventDefault();
+  }
+  function end() { sigDrawing = false; }
+
+  sigCanvas.addEventListener('mousedown', start);
+  sigCanvas.addEventListener('mousemove', move);
+  sigCanvas.addEventListener('mouseup', end);
+  sigCanvas.addEventListener('mouseleave', end);
+  sigCanvas.addEventListener('touchstart', start, { passive: false });
+  sigCanvas.addEventListener('touchmove', move, { passive: false });
+  sigCanvas.addEventListener('touchend', end, { passive: false });
+}
+
+document.getElementById('sigClearBtn').addEventListener('click', clearSignature);
+initSignaturePad();
+window.addEventListener('resize', resizeSigCanvas);
 
 document.getElementById('addBtn').onclick = () => {
   const sel = document.getElementById('prodSelect');
   const qty = parseInt(document.getElementById('qtyInput').value) || 1;
   const person = document.getElementById('nameInput').value.trim();
+  const status = document.getElementById('statusMsg');
   if (!person) {
-    document.getElementById('statusMsg').textContent = 'Introdu numele tău mai întâi.';
-    document.getElementById('statusMsg').style.color = '#C0181A';
+    status.textContent = 'Introdu numele tău mai întâi.';
+    status.style.color = '#C0181A';
     return;
   }
-  history.push({ name: sel.value, qty: qty, person: person, ts: Date.now() });
+  if (!sigHasStroke) {
+    status.textContent = 'Semnează pentru a confirma consumul.';
+    status.style.color = '#C0181A';
+    return;
+  }
+  const sigData = sigCanvas.toDataURL('image/png');
+  history.push({ name: sel.value, qty: qty, person: person, sig: sigData, ts: Date.now() });
   saveHistory();
   localStorage.setItem(NAME_KEY, person);
-  const status = document.getElementById('statusMsg');
   status.style.color = '#2a8a2a';
   status.textContent = 'Adăugat: ' + sel.value + ' ×' + qty + ' (' + person + ')';
+  clearSignature();
   render();
   setTimeout(() => { status.textContent = ''; }, 2000);
 };
@@ -507,6 +710,15 @@ document.getElementById('clearBtn').onclick = () => {
   saveHistory();
   render();
 };
+
+function viewSig(src) {
+  document.getElementById('sigViewImg').src = src;
+  document.getElementById('sigViewOverlay').classList.add('open');
+}
+function closeSigView(ev) {
+  if (ev && ev.target !== document.getElementById('sigViewOverlay')) return;
+  document.getElementById('sigViewOverlay').classList.remove('open');
+}
 
 render();
 </script>
