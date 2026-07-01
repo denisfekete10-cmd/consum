@@ -269,6 +269,40 @@ input[type="number"] {
   border-radius: 12px;
   font-size: 12px;
 }
+.category-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin: 16px 0 6px;
+}
+.category-header:first-child { margin-top: 0; }
+.stock-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #e8e0d0;
+  font-size: 13px;
+  gap: 8px;
+}
+.stock-name { flex: 1; font-weight: 500; }
+.stock-input {
+  width: 56px;
+  padding: 6px 4px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  text-align: center;
+}
+.stock-consumed {
+  font-size: 13px;
+  font-weight: 600;
+  color: #C0181A;
+  min-width: 36px;
+  text-align: right;
+}
 .history-row-readonly {
   display: flex;
   justify-content: space-between;
@@ -322,12 +356,7 @@ input[type="number"] {
 
 <div id="statusMsg"></div>
 
-<div class="history-header" style="margin-top:24px;">
-  <span class="history-title">Istoric consum</span>
-</div>
-<div id="publicHistoryList"></div>
-
-<div class="admin-link">
+<div class="admin-link" style="margin-top:14px;">
   <a href="#" id="adminToggle">Admin</a>
 </div>
 
@@ -351,8 +380,9 @@ input[type="number"] {
     </div>
 
     <div class="history-header">
-      <span class="history-title">Raport pe produs</span>
+      <span class="history-title">Stoc &amp; consum pe produs</span>
     </div>
+    <div class="sig-hint" style="margin-bottom:8px;">Introdu stocul curent pentru fiecare produs. Se salvează automat.</div>
     <div id="productReport" style="margin-bottom:20px;"></div>
 
     <div class="history-header">
@@ -373,6 +403,11 @@ input[type="number"] {
   </div>
 </div>
 
+<div class="history-header" style="margin-top:24px;">
+  <span class="history-title">Istoric consum</span>
+</div>
+<div id="publicHistoryList"></div>
+
 <div class="sig-view-overlay" id="sigViewOverlay" onclick="closeSigView(event)">
   <div class="sig-view-box">
     <img id="sigViewImg" src="" alt="Semnătură">
@@ -385,8 +420,10 @@ const PRODUCTS = {"Băuturi Reci":["Cola 0.25L", "Cola 0.5L", "Cola zero 0.25L",
 
 const STORAGE_KEY = 'mille-saporri-consum-history';
 const NAME_KEY = 'mille-saporri-consum-lastname';
+const STOCK_KEY = 'mille-saporri-consum-stock';
 
 let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+let stock = JSON.parse(localStorage.getItem(STOCK_KEY) || '{}');
 let activeCategory = Object.keys(PRODUCTS)[0];
 
 const ADMIN_CODE_KEY = 'mille-saporri-admin-code';
@@ -453,6 +490,26 @@ function saveHistory() {
       console.error('Firebase save error:', e);
     });
   }
+}
+
+function saveStock() {
+  localStorage.setItem(STOCK_KEY, JSON.stringify(stock));
+  if (window.fbdb) {
+    window.fbdb.ref('consum/stock').set(stock).catch(function(e) {
+      console.error('Firebase stock save error:', e);
+    });
+  }
+}
+
+if (window.fbdb) {
+  window.fbdb.ref('consum/stock').on('value', function(snapshot) {
+    var data = snapshot.val();
+    stock = data && typeof data === 'object' ? data : {};
+    localStorage.setItem(STOCK_KEY, JSON.stringify(stock));
+    if (typeof render === 'function') render();
+  }, function(err) {
+    console.error('Firebase stock read error:', err);
+  });
 }
 
 if (window.fbdb) {
@@ -556,24 +613,58 @@ function renderHistory() {
   });
 }
 
+function updateStockValue(name, rawVal) {
+  const val = parseInt(rawVal);
+  if (isNaN(val) || val < 0) {
+    stock[name] = 0;
+  } else {
+    stock[name] = val;
+  }
+  saveStock();
+  renderProductReport();
+}
+
 function renderProductReport() {
   const container = document.getElementById('productReport');
   if (!container) return;
   container.innerHTML = '';
-  const totals = {};
+  const consumed = {};
   history.forEach(h => {
-    totals[h.name] = (totals[h.name] || 0) + h.qty;
+    consumed[h.name] = (consumed[h.name] || 0) + h.qty;
   });
-  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-  if (sorted.length === 0) {
-    container.innerHTML = '<div class="empty-state">Nimic consumat încă</div>';
-    return;
-  }
-  sorted.forEach(([name, qty]) => {
-    const row = document.createElement('div');
-    row.className = 'report-row';
-    row.innerHTML = '<span class="report-name">' + name + '</span><span class="report-qty">' + qty + ' buc</span>';
-    container.appendChild(row);
+  Object.keys(PRODUCTS).forEach(cat => {
+    const header = document.createElement('div');
+    header.className = 'category-header';
+    header.textContent = cat;
+    container.appendChild(header);
+
+    PRODUCTS[cat].forEach(name => {
+      const qtyConsumed = consumed[name] || 0;
+      const qtyStock = stock[name] || 0;
+
+      const row = document.createElement('div');
+      row.className = 'stock-row';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'stock-name';
+      nameEl.textContent = name;
+
+      const stockInput = document.createElement('input');
+      stockInput.type = 'number';
+      stockInput.className = 'stock-input';
+      stockInput.min = '0';
+      stockInput.value = qtyStock;
+      stockInput.onchange = () => updateStockValue(name, stockInput.value);
+
+      const consumedEl = document.createElement('span');
+      consumedEl.className = 'stock-consumed';
+      consumedEl.textContent = '-' + qtyConsumed;
+
+      row.appendChild(nameEl);
+      row.appendChild(stockInput);
+      row.appendChild(consumedEl);
+      container.appendChild(row);
+    });
   });
 }
 
